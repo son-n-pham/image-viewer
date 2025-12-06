@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pro Gallery + ZIP Support</title>
+    
+    <!-- Load JSZip library for client-side unzipping -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+    <style>
+        :root {
+            --bg-color: #121212;
+            --panel-bg: #1e1e1e;
+            --text-color: #e0e0e0;
+            --accent-color: #3b82f6;
+            --toolbar-bg: rgba(0, 0, 0, 0.7);
+            --danger-color: #ef4444;
+        }
+
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        h1 { margin-bottom: 20px; font-weight: 300; letter-spacing: 1px; }
+
+        .control-panel {
+            width: 100%;
+            max-width: 700px;
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 15px;
+        }
+
+        .btn {
+            background-color: var(--panel-bg);
+            color: var(--text-color);
+            border: 1px solid #444;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: 0.2s;
+            font-size: 0.9rem;
+        }
+
+        .btn:hover { background-color: #333; }
+        .btn-danger { color: var(--danger-color); border-color: #662222; }
+        .btn-danger:hover { background-color: #2a1515; }
+
+        #drop-area {
+            border: 2px dashed #444;
+            border-radius: 12px;
+            width: 100%;
+            max-width: 700px;
+            padding: 40px;
+            text-align: center;
+            background-color: var(--panel-bg);
+            transition: 0.3s;
+            cursor: pointer;
+            margin-bottom: 30px;
+            box-sizing: border-box;
+        }
+
+        #drop-area:hover, #drop-area.highlight {
+            border-color: var(--accent-color);
+            background-color: #262626;
+        }
+
+        #status-msg {
+            margin-top: 10px;
+            font-size: 0.9rem;
+            color: var(--accent-color);
+            min-height: 1.2em;
+        }
+        
+        #fileElem { display: none; }
+
+        /* Gallery Grid */
+        #gallery {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 12px;
+            width: 100%;
+            max-width: 1600px;
+        }
+
+        .gallery-item {
+            position: relative;
+            padding-bottom: 100%;
+            overflow: hidden;
+            border-radius: 6px;
+            cursor: pointer;
+            background-color: #000;
+        }
+
+        /* Hover effect for delete button */
+        .gallery-item:hover .delete-btn {
+            opacity: 1;
+        }
+
+        .gallery-item img {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0;
+            transition: transform 0.3s, opacity 0.5s;
+        }
+
+        .gallery-item.loaded img { opacity: 1; }
+        .gallery-item:hover img { transform: scale(1.08); }
+
+        .delete-btn {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: rgba(0, 0, 0, 0.6);
+            color: white;
+            border: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 10;
+            opacity: 0;
+            transition: opacity 0.2s, background 0.2s;
+            font-size: 16px;
+            line-height: 1;
+        }
+
+        .delete-btn:hover {
+            background: var(--danger-color);
+        }
+
+        /* Modal / Lightbox */
+        #modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.98);
+            overflow: hidden;
+            user-select: none;
+        }
+
+        #modal-viewport {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        #modal-img {
+            max-width: 100%;
+            max-height: 100%;
+            transform-origin: center center;
+            cursor: grab;
+            will-change: transform;
+        }
+
+        #modal-img.grabbing { cursor: grabbing; }
+        #modal-img.smooth { transition: transform 0.3s ease-out; }
+
+        .modal-nav {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: none;
+            width: 50px;
+            height: 50px;
+            font-size: 24px;
+            cursor: pointer;
+            border-radius: 50%;
+            transition: 0.2s;
+            z-index: 1010;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-nav:hover { background: rgba(255, 255, 255, 0.3); }
+        #prev-btn { left: 20px; }
+        #next-btn { right: 20px; }
+
+        #close-btn {
+            position: absolute;
+            top: 20px;
+            right: 30px;
+            color: #fff;
+            font-size: 35px;
+            cursor: pointer;
+            z-index: 1020;
+            line-height: 1;
+        }
+
+        #toolbar {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--toolbar-bg);
+            padding: 10px 20px;
+            border-radius: 30px;
+            display: flex;
+            gap: 15px;
+            z-index: 1010;
+            backdrop-filter: blur(5px);
+        }
+
+        .tool-btn {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+        }
+
+        .tool-btn:hover { background: rgba(255,255,255,0.2); }
+
+        #counter {
+            position: absolute;
+            top: 20px;
+            left: 30px;
+            color: #888;
+            font-size: 1rem;
+            z-index: 1010;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Pro Gallery + ZIP Support</h1>
+
+    <div class="control-panel">
+        <button id="clear-gallery-btn" class="btn btn-danger" style="display: none;">Clear All</button>
+    </div>
+
+    <div id="drop-area">
+        <p><strong>Drag & Drop Images or ZIP files</strong><br>or click to select</p>
+        <div id="status-msg"></div>
+        <!-- Accept images and zips -->
+        <input type="file" id="fileElem" multiple accept="image/*, .zip, application/zip, application/x-zip-compressed">
+    </div>
+
+    <div id="gallery"></div>
+
+    <div id="modal">
+        <span id="close-btn" title="Close">&times;</span>
+        <div id="counter"></div>
+        <button id="prev-btn" class="modal-nav">&#10094;</button>
+        <button id="next-btn" class="modal-nav">&#10095;</button>
+        <div id="modal-viewport">
+            <img id="modal-img" src="" draggable="false">
+        </div>
+        <div id="toolbar">
+            <button class="tool-btn" id="zoom-out">➖</button>
+            <button class="tool-btn" id="zoom-in">➕</button>
+            <button class="tool-btn" id="rotate-left">↺</button>
+            <button class="tool-btn" id="rotate-right">↻</button>
+            <button class="tool-btn" id="reset-view">⟲</button>
+        </div>
+    </div>
+
+    <script>
+        // --- State Management ---
+        let imageUrls = [];
+        let currentIndex = 0;
+        
+        // Transform State
+        let scale = 1;
+        let rotation = 0;
+        let panX = 0;
+        let panY = 0;
+        let isDragging = false;
+        let startX, startY;
+
+        // --- Elements ---
+        const dropArea = document.getElementById('drop-area');
+        const fileElem = document.getElementById('fileElem');
+        const gallery = document.getElementById('gallery');
+        const clearBtn = document.getElementById('clear-gallery-btn');
+        const modal = document.getElementById('modal');
+        const modalImg = document.getElementById('modal-img');
+        const counter = document.getElementById('counter');
+        const statusMsg = document.getElementById('status-msg');
+        
+        // --- Drag & Drop Setup ---
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, e => { e.preventDefault(); e.stopPropagation(); }, false);
+        });
+
+        dropArea.addEventListener('dragover', () => dropArea.classList.add('highlight'));
+        ['dragleave', 'drop'].forEach(eventName => dropArea.classList.remove('highlight'));
+
+        dropArea.addEventListener('drop', e => handleFiles(e.dataTransfer.files));
+        dropArea.addEventListener('click', () => fileElem.click());
+        fileElem.addEventListener('change', function() { handleFiles(this.files); });
+
+        // --- CORE FILE LOGIC ---
+        async function handleFiles(files) {
+            statusMsg.innerText = "Processing files...";
+            
+            // Convert FileList to Array
+            const fileArray = [...files];
+            let newImagesCount = 0;
+            
+            for (const file of fileArray) {
+                if (file.type.startsWith('image/')) {
+                    // Handle Standard Image
+                    addImageToState(file);
+                    newImagesCount++;
+                } else if (isZipFile(file)) {
+                    // Handle ZIP File
+                    statusMsg.innerText = `Unzipping ${file.name}...`;
+                    await handleZipFile(file);
+                    // Zip handling adds images internally, assume it processes correctly
+                }
+            }
+
+            renderGallery();
+            statusMsg.innerText = ""; // Clear status
+        }
+
+        function isZipFile(file) {
+            return file.type.includes('zip') || file.name.toLowerCase().endsWith('.zip');
+        }
+
+        async function handleZipFile(file) {
+            try {
+                const zip = await JSZip.loadAsync(file);
+                const promises = [];
+
+                zip.forEach((relativePath, zipEntry) => {
+                    if (zipEntry.dir) return; // Skip directories
+                    
+                    // Simple check for image extensions
+                    if (!isImageExtension(zipEntry.name)) return;
+
+                    // Convert zip entry to Blob
+                    const promise = zipEntry.async("blob").then(blob => {
+                        // Create a file-like object with the correct type
+                        const imageBlob = new Blob([blob], { type: getMimeType(zipEntry.name) });
+                        addImageToState(imageBlob);
+                    });
+                    promises.push(promise);
+                });
+
+                // Wait for all images in this zip to be processed
+                await Promise.all(promises);
+            } catch (err) {
+                console.error("Error Unzipping:", err);
+                statusMsg.innerText = "Error reading ZIP file.";
+            }
+        }
+
+        function isImageExtension(filename) {
+            const validExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
+            return validExtensions.some(ext => filename.toLowerCase().endsWith(ext));
+        }
+
+        function getMimeType(filename) {
+            const ext = filename.split('.').pop().toLowerCase();
+            const types = {
+                'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
+                'png': 'image/png', 'gif': 'image/gif',
+                'webp': 'image/webp', 'bmp': 'image/bmp', 'svg': 'image/svg+xml'
+            };
+            return types[ext] || 'image/jpeg';
+        }
+
+        function addImageToState(blobOrFile) {
+            const objectUrl = URL.createObjectURL(blobOrFile);
+            imageUrls.push(objectUrl);
+        }
+
+        function renderGallery() {
+            gallery.innerHTML = '';
+            
+            if (imageUrls.length > 0) {
+                clearBtn.style.display = 'inline-block';
+            } else {
+                clearBtn.style.display = 'none';
+            }
+
+            imageUrls.forEach((url, idx) => {
+                const div = document.createElement('div');
+                div.className = 'gallery-item';
+                div.innerHTML = `
+                    <img src="${url}" loading="lazy" alt="Image">
+                    <button class="delete-btn" title="Remove Image">&times;</button>
+                `;
+                
+                div.querySelector('img').onload = () => div.classList.add('loaded');
+                
+                // Click on image opens modal
+                div.addEventListener('click', (e) => {
+                    if (e.target.classList.contains('delete-btn')) return;
+                    openModal(idx);
+                });
+
+                // Click on delete button
+                div.querySelector('.delete-btn').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    removeImage(idx);
+                });
+                
+                gallery.appendChild(div);
+            });
+        }
+
+        function removeImage(index) {
+            // Revoke URL to avoid memory leaks
+            // URL.revokeObjectURL(imageUrls[index]); // Optional: depending on if we think we might undo
+            
+            imageUrls.splice(index, 1);
+            renderGallery();
+        }
+
+        function clearGallery() {
+            if (!confirm("Are you sure you want to clear all images?")) return;
+            
+            // Cleanup URLs
+            // imageUrls.forEach(url => URL.revokeObjectURL(url));
+            
+            imageUrls = [];
+            renderGallery();
+            fileElem.value = ""; // Reset input so same file can be selected again
+        }
+
+        clearBtn.addEventListener('click', clearGallery);
+
+        // --- Modal & Transformation Logic (Same as before) ---
+        function openModal(index) {
+            modal.style.display = 'block';
+            showSlide(index);
+            document.addEventListener('keydown', handleKeyInput);
+        }
+
+        function closeModal() {
+            modal.style.display = 'none';
+            modalImg.src = "";
+            document.removeEventListener('keydown', handleKeyInput);
+        }
+
+        function showSlide(index) {
+            if (imageUrls.length === 0) {
+                closeModal();
+                return;
+            }
+
+            if (index >= imageUrls.length) index = 0;
+            if (index < 0) index = imageUrls.length - 1;
+
+            currentIndex = index;
+            resetTransform();
+            
+            modalImg.classList.remove('smooth');
+            modalImg.src = imageUrls[index];
+            counter.innerText = `${index + 1} / ${imageUrls.length}`;
+        }
+
+        function nextSlide() { showSlide(currentIndex + 1); }
+        function prevSlide() { showSlide(currentIndex - 1); }
+
+        function updateTransform() {
+            modalImg.style.transform = `translate(${panX}px, ${panY}px) rotate(${rotation}deg) scale(${scale})`;
+        }
+
+        function resetTransform() {
+            scale = 1; rotation = 0; panX = 0; panY = 0;
+            modalImg.classList.add('smooth');
+            updateTransform();
+        }
+
+        // Controls
+        document.getElementById('zoom-in').onclick = () => { scale += 0.2; updateTransform(); };
+        document.getElementById('zoom-out').onclick = () => { if(scale > 0.4) scale -= 0.2; updateTransform(); };
+        document.getElementById('rotate-right').onclick = () => { rotation += 90; updateTransform(); };
+        document.getElementById('rotate-left').onclick = () => { rotation -= 90; updateTransform(); };
+        document.getElementById('reset-view').onclick = resetTransform;
+        
+        document.getElementById('close-btn').onclick = closeModal;
+        document.getElementById('next-btn').onclick = (e) => { e.stopPropagation(); nextSlide(); };
+        document.getElementById('prev-btn').onclick = (e) => { e.stopPropagation(); prevSlide(); };
+
+        // Mouse Interactions
+        modal.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const delta = Math.sign(e.deltaY) * -1;
+            let newScale = scale + (delta * 0.1);
+            if (newScale < 0.2) newScale = 0.2;
+            if (newScale > 10) newScale = 10;
+            scale = newScale;
+            updateTransform();
+        });
+
+        modalImg.addEventListener('mousedown', (e) => {
+            if(scale <= 1 && rotation % 360 === 0) return;
+            isDragging = true;
+            startX = e.clientX - panX;
+            startY = e.clientY - panY;
+            modalImg.classList.add('grabbing');
+            modalImg.classList.remove('smooth');
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            e.preventDefault();
+            panX = e.clientX - startX;
+            panY = e.clientY - startY;
+            updateTransform();
+        });
+
+        document.addEventListener('mouseup', () => {
+            isDragging = false;
+            modalImg.classList.remove('grabbing');
+        });
+
+        function handleKeyInput(e) {
+            if (e.key === 'ArrowLeft') prevSlide();
+            if (e.key === 'ArrowRight') nextSlide();
+            if (e.key === 'Escape') closeModal();
+            if (e.key === '+' || e.key === '=') { scale += 0.2; updateTransform(); }
+            if (e.key === '-') { if(scale>0.4) scale -= 0.2; updateTransform(); }
+        }
+
+    </script>
+</body>
+</html>
